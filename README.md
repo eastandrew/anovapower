@@ -1,2 +1,2 @@
 # anovapower
-Walkthrough of ANOVA power analysis in R through Markdown file
+Walkthrough of ANOVA power analysis in R
