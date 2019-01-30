@@ -1,0 +1,192 @@
+---
+title: "ANOVA Power Analysis in R"
+author: "Andrew East"
+date: "January 29, 2019"
+output: html_document
+---
+
+```{r library, echo=F}
+library(pwr)
+```
+
+# How large of a sample size do you need?
+
+The traditional use of a power test is to solve for a sample size that will allow a certain amount of power given a number of treatments, sample sizes, and effect size.  Using the `pwr.anova.test()` function in the `pwr` package, it looks something like this:
+
+```{r pwr test from package}
+pwr.anova.test(k=5,               # k is the number of groups
+               n=NULL,               # n is the sample size for each group
+               f=0.25,            # f is Cohen's f (1988), for effect size
+               sig.level=0.05,    # sig.level is the selected alpha for your hypothesis test
+               power=0.8)         # power is the desired level of power (beta)
+
+```
+
+In this case, we left the sample size blank (`n=NULL`) and the results in the R console tell us that a sample size of 39.15 would allow detection of a 0.25 effect size with 0.8 power, 0.05 alpha, across 5 groups.
+
+Below you can see how sample size influences power across a range of sample sizes.
+```{r plot of power test, fig.height=5,fig.width=5}
+pwrobj <- pwr.anova.test(k=5,               
+                         n=NULL,               
+                         f=0.25,            
+                         sig.level=0.05,   
+                         power=0.8)
+plot(pwrobj)
+
+```
+
+Using this plot-based approach, we can explore other combinations of power and effect size.
+If we accept a lower power level we see that optimal sample size is reduced:
+
+```{r low power plot, fig.height=5, fig.width=5,echo=F}
+plot(pwr.anova.test(k=5,f=0.25,sig.level=0.05,power=0.5))
+
+```
+
+Alternatively, if we expect our data to show a larger effect size, we can see that reducing sample size would retain high power:
+
+```{r high effect size plot, fig.height=5, fig.width=5, echo=F}
+plot(pwr.anova.test(k=5,f=0.35,sig.level=0.05,power=0.8))
+
+```
+
+# Ok, but what does effect size mean?
+
+The key here is that effect size does not relate to the size of the "effect" we're measuring with our hypothesis test or experiment.
+The simplest description I've read for between group effect size is the proportion of the overall variation in the data that is explained by the treatments.  There are several ways to quantify this (see Cohen 1988 for the "diety of power tests"), and they all require making up some fake data to play with.
+
+## Make up data
+
+```{r fake data}
+## Make fake data to see what effect sizes look like
+set.seed(101987)                                                    # make your random numbers the same as mine for this R session (close after done!!)
+resp <- c(rnorm(n=6,mean=10,sd=1),
+          rnorm(n=6,mean=9,sd=1),
+          rnorm(n=6,mean=10,sd=2))                                  # build response vector
+treat <- c(rep("a",6),rep("b",6),rep("c",6))                        # build treatment vector
+df <- data.frame(resp=resp,treat=treat)                             # combine vectors into dataframe
+df                                                                  # look at dataframe
+boxplot(resp~factor(treat), data=df)                                # look at boxplot of same data
+
+
+```
+
+Now that we have a sense of what a data frame of fake data would look like for a very clean ANOVA design, let's calculate Cohen's f.
+Essentially, sum the squared differences between the group means and the grand mean and divide that sum by the sample size.  Square root that fraction and then divide it by the standard deviation of the entire response vector.  Similar to a z-score but accounting for all the groups.
+
+```{r cohens f}
+## to calculate Cohen's f
+grandmean <- mean(df$resp)                              # the mean resp of the df
+a <- mean(df$resp[df$treat=="a"])                       # group means of df
+b <- mean(df$resp[df$treat=="b"])
+c <- mean(df$resp[df$treat=="c"])
+leng <- length(unique(df$treat))                        # number of groups
+
+sigma_m <- sqrt((sum((c(a,b,c)-grandmean)^2))/leng)     # see Cohen 88, page 275, but essentially the sum of the squared mean 
+                                                        # differences divded by number of groups and sqaure rooted (similar to sum of 
+                                                        # squares in an ANOVA)
+sigma <- sd(df$resp)                                    # overall sd for response
+f <- sigma_m/sigma                                      # Cohen's f for this particular ANOVA test.
+f                                                       # the somewhat small size indicates that there is little effect of the 
+                                                        # treatment
+
+```
+
+This value is useful in helping determine how "large" the effect is--this is made more clear by looking at actual ANOVA output:
+
+```{r anova output}
+## also, to calculate Cohen's n^2
+aov1 <- aov(resp~factor(treat), data=df)               # create ANOVA object with resp explained by factorized treatment in df dataframe
+aov1                                                   # look at ANOVA object
+summary(aov1)                                          # see summary, including p-value, of ANOVA object
+sumobj <- unlist(summary(aov1))                        # change the structure of the anova summary object
+aoveff <- sumobj["Sum Sq1"]/sumobj["Sum Sq2"]          # the treatment sum of squares / residual sum of squares
+aoveff
+
+```
+
+The ratio between treatment sum of squares and total (residuals) sum of squares is the proportion of the variation explained by the treatments.  
+In this case, ~7% of the variation is explained by the treatment.  This value is relatively small, which corroborates with our interpretation above from the f value that the treatment effect is relatively small in this dataset.
+
+
+An additional effect size metric from Cohen (88) is 'd.'  This value relates the range in means to the standard deviation of the response vector.
+```{r cohens d from max max and min min}
+d <- (max(c(a,b,c))-min(c(a,b,c)))/sigma      # using the maximum mean and minimum mean 
+d                                             # this d suggests small to intermediate effects
+
+```
+Interpretation of this value requires comparison to tables--0.5 corresponds with low end intermediate effect size.
+
+
+# Ok, now that effect size makes sense, what about power?
+
+If we take the above fake data and run it through the `pwr.anova.test()` function, we see that power (beta) is very low.
+
+```{r plot using values}
+
+pwr.anova.test(n=6,k=3,f=0.25,sig.level=0.05)
+
+```
+
+## Why is this?  
+Think about alpha--we use a very small value (0.05) as our cut-off as it represents the likelihood that we would make a type I error ("a false positive" or failure to accept the correct null hypothesis).  This is bad and we want to avoid it.  Beta (power) is the converse--type II error (a "false negative" or failure to reject the incorrect null hypothesis), this is also bad, but much harder to get your hands.  The wikipedia example is a blood test failing to detect a compound it was designed to detect.  The same example for type I error is detecting a disease when the patient doesn't actually have it.  Assuming the treatment is not catastrophic, this is less bad than not detecting the disease (type II).
+
+In our fake data, why would we not be confident in our ANOVA explaining the difference between treatment groups below:
+```{r boxplot, echo=F, fig.height=5, fig.width=5}
+boxplot(resp~factor(treat), data=df)
+
+```
+
+It would be very difficult to conclude that the difference between groups is outside of randomness with such uneven variability.  Importantly, in this case, the median values are in a monotonic decreased trend which might be what we expected to find and might in fact be the truth, but we would reject due to variance.  Hard to know if that was the correct choice based on these data--this experiment needs to be re-run.
+
+## Let's explore another example using fake data
+
+In this dataset, I've evened the standard deviations and made the means more different...let's see what happens to our effect size.
+```{r}
+## Make fake data to see what effect sizes look like
+set.seed(10191987)                                   # make your random numbers the same as mine for this R session
+resp2 <- c(rnorm(n=6,mean=10,sd=1),
+          rnorm(n=6,mean=9,sd=1),
+          rnorm(n=6,mean=8,sd=1))                   # build response vector
+treat2 <- c(rep("a",6),rep("b",6),rep("c",6))         # build treatment vector
+df2 <- data.frame(resp=resp2,treat=treat2)              # combine vectors into dataframe
+df2                                                   # look at dataframe
+boxplot(resp~factor(treat), data=df2)                 # look at boxplot of same data
+
+```
+
+```{r calcs hidden, echo=F}
+
+## to calculate Cohen's f
+grandmean2 <- mean(df2$resp)                          
+a2 <- mean(df2$resp[df2$treat=="a"])                       
+b2 <- mean(df2$resp[df2$treat=="b"])
+c2 <- mean(df2$resp[df2$treat=="c"])
+leng2 <- length(unique(df2$treat))
+sigma_m2 <- sqrt((sum((c(a2,b2,c2)-grandmean2)^2))/leng2)
+sigma2 <- sd(df2$resp) 
+f2 <- sigma_m2/sigma2
+
+## also, to calculate Cohen's n^2
+aov2 <- aov(resp~factor(treat), data=df2)
+sumobj2 <- unlist(summary(aov2))  
+aoveff2 <- sumobj2["Sum Sq1"]/sumobj2["Sum Sq2"]       
+
+d2 <- (max(c(a2,b2,c2))-min(c(a2,b2,c2)))/sigma2 
+
+pwrobj2 <- pwr.anova.test(n=6,k=3,f=f2,sig.level=0.05)$power
+```
+
+Using these data the new Cohen's f is `r f2`, eta squared (n^2) is `r aoveff2`, and Cohen's d is `r d2`.  
+Clearly, the effect size is a lot larger--the treatment has more effect on the variation.
+Using the `pwr.anova.test()` function and this Cohen's f value, our power is `r pwrobj2`.  
+Again, this is clearly better power with more effect size.
+
+
+
+
+
+
+
+
+
